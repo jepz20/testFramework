@@ -16,7 +16,7 @@ const base = {
       val: "media.video.url"
     }
   ],
-  flow:  [
+  flow: [
     {
       url: "epglistings",
       asserts: [
@@ -58,9 +58,40 @@ const base = {
       ]
     }
   ]
-}
+};
 
-
+const test1 = {
+  name: "Streaming not Allowed",
+  prepData: [
+    {
+      endpoint: "epglistings",
+      path: "streamingAllowed",
+      val: false
+    }
+  ],
+  flow: [
+    {
+      url: "epglistings",
+      asserts: [
+        {
+          path: "mediaSourceId",
+          expected: "otra cosa"
+        }
+      ]
+    },
+    {
+      url: "liveplayer/:stationId",
+      asserts:
+        // null
+        [
+          {
+            path: "contentAdType2",
+            expected: "OTRA COSA2"
+          }
+        ]
+    }
+  ]
+};
 // const e2e = R.pipe(
 //   prepData
 //   assertEPGListing,
@@ -70,116 +101,83 @@ const base = {
 // )(testCases)
 
 // GENERAL UTILITIES
-const notNil = R.complement(R.isNil)
-const propIsNil = R.propSatisfies(R.isNil)
-const propNotNil = R.complement(propIsNil)
-const propDefaultArray = R.propOr([])
-const concatUniq = R.curry(
-  (fn, a, b) => R.pipe(
+const notNil = R.complement(R.isNil);
+const propIsNil = R.propSatisfies(R.isNil);
+const propNotNil = R.complement(propIsNil);
+const propDefaultArray = R.propOr([]);
+const istNotArray = R.complement(Array.isArray);
+const listify = R.when(istNotArray, R.append(R.__, []));
+const concatUniq = R.curry((uniqueFn, left, right) => {
+  return R.pipe(
     R.concat,
-    R.uniqBy(fn)
-  )(b, a)
-)
+    R.uniqBy(uniqueFn)
+  )(listify(left), listify(right));
+});
 const findPropEq = R.curry((k, o, l) => R.find(R.eqProps(k, o), l));
-const join = R.join(',')
-const guardProp = R.curry((prop, fn) => R.when(propNotNil(prop), fn))
+const join = R.join(",");
+const guardProp = R.curry((prop, fn) => R.when(propNotNil(prop), fn));
 
 // SPECIFIC UTILITIES
-const getAsserts =  propDefaultArray("asserts")
-const getFlow = propDefaultArray("flow")
-const getPrepData = propDefaultArray("prepData")
-const getPath = R.propOr("", "path")
+const getAsserts = propDefaultArray("asserts");
+const getFlow = propDefaultArray("flow");
+const getPrepData = propDefaultArray("prepData");
+const getPath = R.propOr("", "path");
+const getUrl = R.propOr("", "url");
 const getEndPointAndPath = R.pipe(
   R.props(["endpoint", "path"]),
   join
-)
+);
 
-const concatUniqByPath = concatUniq(getPath)
+const combineListProp = R.curry(
+  (prop, id, k, l, r) => (k === prop ? concatUniq(id, l, r) : r)
+);
 
-const uniqueFlow = R.curry((prop, k, l, r) => k === prop ? concatUniqByPath(l, r) : r);
-
+const uniqueFlow = combineListProp("asserts", getPath);
 const findUrlEq = findPropEq("url");
 
-
 const generatePrepData = R.curry((extension, base) =>
-  guardProp("prepData",
+  guardProp(
+    "prepData",
     R.pipe(
       getPrepData,
-      concatUniq(
-        getEndPointAndPath,
-        base
-      )
+      concatUniq(getEndPointAndPath, base)
     )
   )(extension)
-)
+);
 
-const generateFlow = R.curry((base, extension) => {
-  // Base flow
-  // Extension Flow
-  // concat Both Flows
-  // If it exists in both, merge assets
-  // If exists just in one add
-  // All of this need to be rethinked
-  console.log('((((((((extension))))))))')
-  console.log(extension)
+const mergeAllWith = (fnMerge, fnUniq, list) => {
+  return R.reduce((acc, n) => R.pipe(
+    findUrlEq(n),
+    R.ifElse(
+      notNil,
+      R.mergeWithKey(fnMerge, n),
+      () => {
+        return R.identity(n);
+      }
+    ),
+    concatUniq(fnUniq, R.__, acc)
+  )(acc), []);
+};
+
+const generateFlow = R.curry((extension, base) => {
   return R.pipe(
     getFlow,
-    findUrlEq(base),
-    guardProp("asserts",
-      R.mergeWithKey(uniqueFlow("asserts"), base)
-    )
-  )(extension)
+    R.concat(base),
+    mergeAllWith(uniqueFlow, getUrl)
+  )(extension);
 });
-
-const mapFlow = (base, extension) => R.map(generateFlow(base), extensions);
 
 const generateCase = extension => {
   // algo con zip para para ejecutar cada funcion con extension
-  console.log('(((((ASDF____')
-  console.log(generateFlow(getFlow(base), extension))
-  console.log('(((((ASDF)))))')
   return R.mergeAll([
     base,
-    R.objOf("prepData", generatePrepData(extension, getPrepData(base))),
-    R.objOf("flow", generateFlow(getFlow(base), extension)),
-  ])
+    R.objOf("prepData")(generatePrepData(extension, getPrepData(base))),
+    R.objOf("flow")(generateFlow(extension, getFlow(base)))
+  ]);
 };
 
-const testCases = [
-  generateCase({
-    name: "Streaming not Allowed",
-    prepData: [
-      {
-        endpoint: "epglistings",
-        path: "streamingAllowed",
-        val: false
-      }
-    ],
-    flow: [
-      {
-        url: "epglistings",
-        asserts: [
-          {
-            path: "mediaSourceId",
-            expected: "otra cosa"
-          }
-        ]
-      },
-      {
-        url: "liveplayer/:stationId",
-        asserts:
-        // null
-        [
-          {
-            path: "contentAdType2",
-            expected: "OTRA COSA2"
-          }
-        ]
-      }
-    ]
-  })
-];
-
+const testCases = [generateCase(test1)];
+console.log("--=-=-=-=-=-=-RESULT=-=-=-=-=-=");
 console.log(JSON.stringify(testCases, null, 4));
 
 // const putData = ([url, base]) => got.put(url, base)

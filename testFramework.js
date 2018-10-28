@@ -62,11 +62,17 @@ const base = {
 
 const test1 = {
   name: "Streaming not Allowed",
+  description: "QUE PPX",
   prepData: [
     {
       endpoint: "epglistings",
       path: "streamingAllowed",
       val: false
+    },
+    {
+      endpoint: "new",
+      path: "doesn't matter",
+      val: "LEGEND"
     }
   ],
   flow: [
@@ -116,6 +122,26 @@ const concatUniq = R.curry((uniqueFn, left, right) => {
 const findPropEq = R.curry((k, o, l) => R.find(R.eqProps(k, o), l));
 const join = R.join(",");
 const guardProp = R.curry((prop, fn) => R.when(propNotNil(prop), fn));
+const argsToList = R.unapply(R.identity);
+const reverseArgs = R.pipe(
+  argsToList,
+  R.reverse
+);
+
+const mergeAllWith = (fnFind, fnMerge, fnUniq, list) => {
+  return R.reduce(
+    (acc, n) =>
+      R.chain(
+        concatUniq(fnUniq),
+        R.pipe(
+          fnFind(n),
+          R.when(notNil, R.mergeWithKey(fnMerge, n)),
+          R.when(R.isNil, () => n)
+        )
+      )(acc),
+    []
+  );
+};
 
 // SPECIFIC UTILITIES
 const getAsserts = propDefaultArray("asserts");
@@ -129,54 +155,46 @@ const getEndPointAndPath = R.pipe(
 );
 
 const combineListProp = R.curry(
-  (prop, id, k, l, r) => (k === prop ? concatUniq(id, l, r) : r)
+  (prop, id, k, l, r) => (k === prop ? concatUniq(id, l, r) : l)
 );
 
 const uniqueFlow = combineListProp("asserts", getPath);
 const findUrlEq = findPropEq("url");
 
-const generatePrepData = R.curry((extension, base) =>
-  guardProp(
-    "prepData",
-    R.pipe(
-      getPrepData,
-      concatUniq(getEndPointAndPath, base)
-    )
-  )(extension)
+const generatePrepData = R.pipe(
+  argsToList,
+  R.chain(getPrepData),
+  R.uniqBy(getEndPointAndPath)
 );
 
-const mergeAllWith = (fnMerge, fnUniq, list) => {
-  return R.reduce((acc, n) => R.pipe(
-    findUrlEq(n),
-    R.ifElse(
-      notNil,
-      R.mergeWithKey(fnMerge, n),
-      () => {
-        return R.identity(n);
-      }
-    ),
-    concatUniq(fnUniq, R.__, acc)
-  )(acc), []);
-};
+const generateFlow = R.pipe(
+  argsToList,
+  R.chain(getFlow),
+  mergeAllWith(findUrlEq, uniqueFlow, getUrl)
+);
 
-const generateFlow = R.curry((extension, base) => {
-  return R.pipe(
-    getFlow,
-    R.concat(base),
-    mergeAllWith(uniqueFlow, getUrl)
-  )(extension);
-});
+const mergeCase = R.unapply(
+  R.chain(
+    R.append,
+    R.apply(
+      R.applySpec({
+        prepData: generatePrepData,
+        flow: generateFlow
+      })
+    )
+  )
+);
 
-const generateCase = extension => {
-  // algo con zip para para ejecutar cada funcion con extension
-  return R.mergeAll([
-    base,
-    R.objOf("prepData")(generatePrepData(extension, getPrepData(base))),
-    R.objOf("flow")(generateFlow(extension, getFlow(base)))
-  ]);
-};
+const generateCase = R.curryN(
+  2,
+  R.pipe(
+    mergeCase,
+    R.mergeAll
+  )
+);
 
-const testCases = [generateCase(test1)];
+const liveTest = generateCase(base);
+const testCases = liveTest(test1);
 console.log("--=-=-=-=-=-=-RESULT=-=-=-=-=-=");
 console.log(JSON.stringify(testCases, null, 4));
 
